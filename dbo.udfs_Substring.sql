@@ -1,8 +1,19 @@
---DROP FUNCTION dbo.udfs_Substring
+IF NOT EXISTS (SELECT *
+               FROM   sys.objects
+               WHERE  object_id = OBJECT_ID(N'[dbo].[udfs_Substring]')
+                      AND type IN ( N'FN', N'IF', N'TF', N'FS', N'FT' ))
+       EXEC('CREATE FUNCTION dbo.udfs_Substring() RETURNS INT AS BEGIN RETURN 0 END')
+  GO
 
-
-CREATE FUNCTION dbo.udfs_Substring --put in it's own "overload" schema
-(  @fullString NVARCHAR(MAX) 
+/******************TODO
+Might as well remove support for pattern matching, since there's no good way to find the length of the startpat
+Or, create a loop that starts at the startpos, then increments from startpos+1 until endpos. It would take little substrings at a time, check if it would match the pattern
+	(taking out all %) to see if an exact match to that would work.
+	*Caveat: that wouldn't work if there are patterns like [a-z][a-z] because one char at a time wouldn't see the second [a-z].
+	* Maybe add logic that can detect the min length of a string then use that as the number of char to iterate through? Eh, I don't think that'd work either :/
+**********************/
+ALTER FUNCTION dbo.udfs_Substring --put in it's own "overload" schema
+(			@fullString NVARCHAR(MAX) 
 			,@startString NVARCHAR(MAX) 
 			,@endString NVARCHAR(MAX) 
 			,@ispat BIT=0 --defaults to being able to enter it like a charindex, but ispat=1 allows format like patindex
@@ -42,7 +53,8 @@ IF COALESCE(@fullString,'')=''  RETURN NULL;
 
 
 
-IF @startpos =0 RETURN NULL --starting string not found
+IF COALESCE(@startpos,0) =0 OR @beginsub >= LEN(@fullString) 
+	RETURN NULL --starting string not found, or the start string was at the end of the full string
 
 
 -----------------------
@@ -50,21 +62,29 @@ IF @startpos =0 RETURN NULL --starting string not found
 
 --if the starting substring was found, keep going by creating an abbreviated form of the string
 
-IF @includestart=1 SET @truncatedstring= SUBSTRING(@fullString,@startpos,LEN(@fullString))
-	ELSE
-		SET @truncatedstring= SUBSTRING(@fullString,@beginsub,LEN(@fullString))
+IF @includestart=1 
+	SET @truncatedstring= SUBSTRING(@fullString,@startpos,LEN(@fullString))
+ELSE
+	SET @truncatedstring= SUBSTRING(@fullString,@beginsub,LEN(@fullString))
 
-IF COALESCE(@endstring,'')='' SET @endpos=LEN(@truncatedstring)  --does it actually need this +1?
+
+
+
+
+
+IF COALESCE(@endstring,'')='' SET @endpos=LEN(@truncatedstring)  
 ELSE
 	BEGIN
 		SET @endpat= CASE WHEN @ispat=0 THEN CONCAT('%',@endString,'%') ELSE @endString END --convert it into a pattern match
-		SET @endpos=PATINDEX(@endpat,@truncatedstring)-1
+		SET @endpos= PATINDEX(@endpat,@truncatedstring)-1
 	END
 
 
+RETURN CASE WHEN @endpos<=0 THEN NULL
+		ELSE SUBSTRING(@truncatedstring, 1, @endpos)
+		END ;
 
 
-RETURN SUBSTRING(@truncatedstring, 1, @endpos);
 
 END
 
